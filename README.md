@@ -20,9 +20,11 @@ Aquivos importantes:
 
 > Preencha antes de começar (edite este bloco no seu fork), depois faça commit + push.
 
-- **Nome/ID da equipe:** `<preencha>`
+- **Nome/ID da equipe:** Grupo 2
 - **Integrantes:**
-  - `<nome — e-mail>`
-  - `<nome — e-mail>`
-  - `<nome — e-mail>`
-  - `<nome — e-mail>`
+  - Mateus Silva Rocha - mateus@asn.rocks
+  - Fabiana Toledo - fabi.fatoledo@gmail.com
+  - Murilo Silva - murilocauecostasilva@gmail.com
+  - Amanda Honorato -
+  - Ligia Soares -
+  - Leandro Republicano -  
