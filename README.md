@@ -20,9 +20,10 @@ Aquivos importantes:
 
 > Preencha antes de começar (edite este bloco no seu fork), depois faça commit + push.
 
-- **Nome/ID da equipe:** `<preencha>`
+- **Nome/ID da equipe:** Grupo 3
 - **Integrantes:**
-  - `<nome — e-mail>`
-  - `<nome — e-mail>`
-  - `<nome — e-mail>`
-  - `<nome — e-mail>`
+  - Caroline Targino
+  - Maria Eduarda Santos
+  - Raquel Marques
+  - Thiago Nobrega
+  - Bruno Camera
