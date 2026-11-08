@@ -3,7 +3,7 @@
 ## Contents
 
 - [Etapas](#etapas)
-    0. [Infraestrutura e Setup](#0-infraestrutura-e-setup)
+    1. [Infraestrutura e Setup](#0-infraestrutura-e-setup)
     1. [Dados](#1-dados)
     2. [Modelagem](#2-modelagem)
     3. [Entrega Técnica](#3-entrega-técnica)
