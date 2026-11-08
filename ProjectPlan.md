@@ -75,3 +75,47 @@
 
 ## Discussões
 
+> Q = Question |  A = Answer | D = Decision
+
+### 2026-11-07
+
+- Quantidade de linhas dos arquivos vs slide introdutório:
+    - `history.csv` 5634 / 5912 *(-278)*
+    - `inference.csv` 1409 / 1461 *(-52)*
+
+<br>
+
+- Variáveis:
+    - `TotalCharges` com 207 missings
+        - Q: Cálculo reverso usando `tenure` e `MonthlyCharges`?
+            - A: Alguns testes feitos e vemos que os valores não batem na comparação `tenure * MonthlyCharges = TotalCharges`, não dá para simplesmente "substituir".
+            - A: `TotalCharges` e `tenure` tem alta correlação de Peason, talvés só uma seja mais importante ter no modelo.
+        - Q: Qual valor imputar? Média? Regressão Linear para estimar baseado em outras variáveis?
+        - Q: Remoção pode ser uma opção?
+            - A: Se quisermos escorar todos os clientes e manter essa base o ideal não seria remover, pois se esse cliente ligar não teremos a probabilidade de churn já calulada e não teriamos a melhor abordagem para manter o cliente.
+
+
+    - `tenure` variável numérica com uma categoria "unknown".
+        - Q: O que fazer quando não temos quanto tempo o cliente está na base?
+            - A: Como também é numerica, e ela é altamente correlacionada com `TotalCharges`, podemos tentar Regressão Linear.
+        - Q: Podemos usar como categoria para ter modelos diferentes para clientes Novos/Antigos?
+        - Q: Pode ser útil após uam analise de sentimento sobre porque pessoas em diferentes períodos decidem cancelar.
+
+
+    - `PhoneService` variável categorica com 4 categorias: Yes/No/yes/no
+        - D: Correct spelling to transform into binary.
+        - Q: Note that we don't have "No phone servive" as a category.
+
+    - `CustomerFeedback` variável de texto podendo ser útil para definir o porquê o consumidor decidiu sair.
+        - Q: Análise de sentimento para criar possíveis categorias do porquê do churn.
+
+
+<br>
+
+- Conceitos
+    - A companhia oferece pelo menos 2 serviços: **internet** ou **phone**, e podemos ter clientes com somente 1 ou os dois.
+        - Q: Definir quais variáveis são de qual serviço para tentar resolver as categorias "No phone service" / "No internet service".  Assim podemos criar uma variável para para clientes com telefone (binária), outra para clientes com intenet (binária) e verificar se "No phone service" é consistente com clientes que não tem linha de telefone.
+
+    - 
+
+        
