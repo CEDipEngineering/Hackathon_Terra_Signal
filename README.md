@@ -24,6 +24,6 @@ Aquivos importantes:
 - **Integrantes:**
   - `Aleônia Oliveira — aleonia.oliveira@gmail.com`
   - `Daniele Farias — dofarias@gmail.com`
-  - `Marcelo Caroprezo — marcelo.caroprezo2@gmail.com>`
+  - `Marcelo Caroprezo — marcelo.caroprezo2@gmail.com`
   - `Patrícia Nascimento — pathilink@gmail.com`
-  - `Thiago Almeida — e-mail>`
+  - `Thiago Almeida — almeida.h.thiago@gmail.com`
