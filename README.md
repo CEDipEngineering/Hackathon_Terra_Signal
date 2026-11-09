@@ -26,4 +26,3 @@ Aquivos importantes:
   - `Daniele Farias — dofarias@gmail.com`
   - `Marcelo Caroprezo — marcelo.caroprezo2@gmail.com`
   - `Patrícia Nascimento — pathilink@gmail.com`
-  - `Thiago Almeida — almeida.h.thiago@gmail.com`
