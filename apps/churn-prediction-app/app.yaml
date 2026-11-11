@@ -1,0 +1,11 @@
+command:
+  - streamlit
+  - run
+  - app.py
+env:
+  - name: OMP_NUM_THREADS
+    value: "1"
+  - name: MKL_NUM_THREADS
+    value: "1"
+  - name: OPENBLAS_NUM_THREADS
+    value: "1"

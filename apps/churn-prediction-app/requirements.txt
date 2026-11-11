@@ -1,0 +1,3 @@
+# Nenhuma dependência adicional: streamlit, requests e databricks-sdk
+# já vêm pré-instalados no runtime de Databricks Apps.
+# O scoring acontece no endpoint de Model Serving `churn-prediction-endpoint`.
