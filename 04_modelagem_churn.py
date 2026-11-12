@@ -2,6 +2,9 @@
 # /// script
 # [tool.databricks.environment]
 # environment_version = "6"
+# dependencies = [
+#   "shap",
+# ]
 # ///
 # MAGIC %md
 # MAGIC # 04 — Modelagem de churn e comparação de modelos
@@ -1617,7 +1620,10 @@ plt.show()
 
 # COMMAND ----------
 
+
+
 # COMMAND ----------
+
 # SVM RBF como challenger
 # Usa as mesmas 14 features, treino estratificado e CV de 5 folds.
 # O conjunto de teste reservado NÃO é usado neste bloco.
@@ -3015,7 +3021,203 @@ display(resumo_segmentos.round(3))
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Testando a importância das Variáveis do modelo final
 
+# COMMAND ----------
+
+import numpy as np
+import pandas as pd
+
+from sklearn.compose import ColumnTransformer
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder
+
+FEATURES_FINAIS = [
+    "tenure", "PhoneService", "MultipleLines", "InternetService",
+    "OnlineSecurity", "OnlineBackup", "DeviceProtection", "TechSupport",
+    "Contract", "PaperlessBilling", "PaymentMethod",
+    "MonthlyCharges", "TotalCharges", "MonthlyIncome",
+]
+
+SEED = 42
+TABELA_HISTORY = "workspace.default.history_modelagem"
+
+history_shap = spark.table(TABELA_HISTORY).toPandas()
+
+X_final = history_shap[FEATURES_FINAIS].copy()
+y_final = history_shap["Churn"].astype(int).copy()
+
+numericas = X_final.select_dtypes(include=np.number).columns.tolist()
+categoricas = [c for c in FEATURES_FINAIS if c not in numericas]
+
+preprocessador_final = ColumnTransformer(
+    transformers=[
+        ("numericas", SimpleImputer(strategy="median"), numericas),
+        (
+            "categoricas",
+            Pipeline([
+                ("imputer", SimpleImputer(strategy="most_frequent")),
+                ("onehot", OneHotEncoder(handle_unknown="ignore")),
+            ]),
+            categoricas,
+        ),
+    ],
+    remainder="drop",
+)
+
+modelo_rf_final = Pipeline([
+    ("preprocessamento", preprocessador_final),
+    ("modelo", RandomForestClassifier(
+        n_estimators=400,
+        max_depth=10,
+        min_samples_leaf=20,
+        class_weight="balanced",
+        random_state=SEED,
+        n_jobs=-1,
+    )),
+])
+
+modelo_rf_final.fit(X_final, y_final)
+
+print("Modelo final preparado para SHAP.")
+
+# COMMAND ----------
+
+# MAGIC %pip install shap
+
+# COMMAND ----------
+
+import shap
+import matplotlib.pyplot as plt
+
+# Amostra apenas para explicabilidade global.
+# Não altera o modelo, as métricas, os scores nem as tabelas.
+N_AMOSTRA_SHAP = min(500, len(X_final))
+X_shap = X_final.sample(n=N_AMOSTRA_SHAP, random_state=SEED)
+
+preprocessador = modelo_rf_final.named_steps["preprocessamento"]
+floresta = modelo_rf_final.named_steps["modelo"]
+
+X_shap_transformado = preprocessador.transform(X_shap)
+
+# SHAP trabalha melhor com matriz densa nesta base pequena.
+if hasattr(X_shap_transformado, "toarray"):
+    X_shap_transformado = X_shap_transformado.toarray()
+
+nomes_transformados = preprocessador.get_feature_names_out()
+
+explainer = shap.TreeExplainer(floresta)
+valores_shap = explainer.shap_values(X_shap_transformado)
+
+# Compatível com versões do SHAP que retornam lista ou array 3D.
+if isinstance(valores_shap, list):
+    valores_churn = valores_shap[1]
+elif valores_shap.ndim == 3:
+    valores_churn = valores_shap[:, :, 1]
+else:
+    valores_churn = valores_shap
+
+def feature_original(nome_transformado):
+    for feature in FEATURES_FINAIS:
+        if (
+            nome_transformado == f"numericas__{feature}"
+            or nome_transformado.startswith(f"categoricas__{feature}_")
+        ):
+            return feature
+    return nome_transformado
+
+importancia_detalhada = pd.DataFrame({
+    "feature_transformada": nomes_transformados,
+    "feature": [feature_original(nome) for nome in nomes_transformados],
+    "importancia_shap": np.abs(valores_churn).mean(axis=0),
+})
+
+importancia_global = (
+    importancia_detalhada
+    .groupby("feature", as_index=False)["importancia_shap"]
+    .sum()
+    .sort_values("importancia_shap", ascending=False)
+    .reset_index(drop=True)
+)
+
+display(importancia_global)
+
+# COMMAND ----------
+
+plt.figure(figsize=(10, 6))
+
+plt.barh(
+    importancia_global["feature"].iloc[::-1],
+    importancia_global["importancia_shap"].iloc[::-1],
+    color="#1F6FEB",
+)
+
+plt.title("Importância global das variáveis no score de churn")
+plt.xlabel("Impacto médio absoluto no score (SHAP)")
+plt.ylabel("")
+plt.grid(axis="x", alpha=0.2)
+plt.tight_layout()
+plt.show()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC O SHAP mostra quais variáveis mais influenciam a priorização de churn do Random Forest. Ele explica o comportamento preditivo do modelo e não demonstra causalidade.
+
+# COMMAND ----------
+
+# Agrupa contribuições SHAP das dummies na feature original
+mapeamento_features = pd.Series(
+    [feature_original(nome) for nome in nomes_transformados],
+    index=nomes_transformados,
+)
+
+shap_detalhado = pd.DataFrame(
+    valores_churn,
+    columns=nomes_transformados,
+    index=X_shap.index,
+)
+
+shap_agrupado = pd.DataFrame(index=X_shap.index)
+
+for feature in FEATURES_FINAIS:
+    colunas_feature = mapeamento_features[
+        mapeamento_features == feature
+    ].index.tolist()
+
+    shap_agrupado[feature] = shap_detalhado[colunas_feature].sum(axis=1)
+
+importancia_global_corrigida = (
+    shap_agrupado
+    .abs()
+    .mean()
+    .sort_values(ascending=False)
+    .reset_index()
+)
+
+importancia_global_corrigida.columns = ["feature", "importancia_shap"]
+
+display(importancia_global_corrigida)
+
+# COMMAND ----------
+
+plt.figure(figsize=(10, 6))
+
+plt.barh(
+    importancia_global_corrigida["feature"].iloc[::-1],
+    importancia_global_corrigida["importancia_shap"].iloc[::-1],
+    color="#1F6FEB",
+)
+
+plt.title("Importância global das variáveis no score de churn")
+plt.xlabel("Impacto médio absoluto no score (SHAP)")
+plt.ylabel("")
+plt.grid(axis="x", alpha=0.2)
+plt.tight_layout()
+plt.show()
 
 # COMMAND ----------
 
@@ -3025,6 +3227,10 @@ display(resumo_segmentos.round(3))
 # MAGIC Cada modelo tem métricas, parâmetros e gráficos de avaliação registrados.
 # MAGIC Caso o workspace não permita criar o experimento compartilhado, altere
 # MAGIC `EXPERIMENTO` para uma pasta onde a equipe tenha permissão de escrita.
+
+# COMMAND ----------
+
+
 
 # COMMAND ----------
 
@@ -3119,8 +3325,10 @@ ORDEM_PUBLICOS = {
 }
 
 # ------------------------------------------------------------
-# 1. Matriz de custos por segmento e faixa de custo
+# 1. Matriz-base de custos por segmento e faixa de custo
 # ------------------------------------------------------------
+# Mantida para todos os segmentos e para clientes com mais de 6 meses.
+# Ela também é a referência de comparação da política atual.
 
 MATRIZ_CUSTOS = {
     "Fibra mensal sem suporte": {
@@ -3155,6 +3363,24 @@ MATRIZ_CUSTOS = {
     },
 }
 
+# Política complementar:
+# clientes de Fibra mensal sem suporte com tenure até 6 meses.
+#
+# Baixo: comunicação digital + pagamento automático + contrato anual.
+# Intermediário: contato proativo assistido + pequeno incentivo.
+# Alto: atendimento remoto reforçado + benefício maior.
+#
+# Uma visita técnica real continua sendo exceção operacional e pode usar
+# o custo alto-base de R$ 180, fora da regra padrão do cenário.
+
+CUSTOS_FIBRA_ATE_6_MESES = {
+    "Baixo": 30,
+    "Intermediario": 60,
+    "Alto": 120,
+}
+
+# A tabela-base permanece com as mesmas três colunas e 18 linhas.
+# Isso ajuda a preservar a estrutura intermediária já esperada no notebook.
 linhas_custo = []
 
 for segmento, custos in MATRIZ_CUSTOS.items():
@@ -3168,6 +3394,21 @@ for segmento, custos in MATRIZ_CUSTOS.items():
 matriz_custos = pd.DataFrame(linhas_custo)
 
 display(matriz_custos)
+
+# Evidência explícita da regra nova, sem alterar a tabela-base.
+display(
+    pd.DataFrame(
+        [
+            {
+                "segmento_acao": "Fibra mensal sem suporte",
+                "faixa_tenure": "0–6 meses",
+                "faixa_custo": faixa,
+                "custo_por_cliente": float(custo),
+            }
+            for faixa, custo in CUSTOS_FIBRA_ATE_6_MESES.items()
+        ]
+    )
+)
 
 # COMMAND ----------
 
@@ -3237,6 +3478,12 @@ for publico_alvo, coluna_publico in COLUNA_PUBLICO.items():
         carteira_elegivel[coluna_publico].eq(True)
     ].copy()
 
+    # Grupo elegível para a política de custo personalizada.
+    base_publico["cliente_fibra_ate_6_meses"] = (
+        base_publico["segmento_acao"].eq("Fibra mensal sem suporte")
+        & base_publico["tenure"].le(6)
+    ).astype(int)
+
     resumo = (
         base_publico
         .groupby("segmento_acao", dropna=False)
@@ -3244,6 +3491,10 @@ for publico_alvo, coluna_publico in COLUNA_PUBLICO.items():
             clientes_abordados=("customerID", "count"),
             mensalidade_media=("MonthlyCharges", "mean"),
             score_medio=("score_churn", "mean"),
+            clientes_fibra_ate_6_meses=(
+                "cliente_fibra_ate_6_meses",
+                "sum",
+            ),
         )
         .reset_index()
     )
@@ -3260,6 +3511,21 @@ for publico_alvo, coluna_publico in COLUNA_PUBLICO.items():
     bases_publico.append(resumo)
 
 base_cenarios = pd.concat(bases_publico, ignore_index=True)
+
+# Checagens da regra personalizada.
+assert (
+    base_cenarios["clientes_fibra_ate_6_meses"]
+    <= base_cenarios["clientes_abordados"]
+).all()
+
+assert (
+    base_cenarios.loc[
+        base_cenarios["segmento_acao"].ne("Fibra mensal sem suporte"),
+        "clientes_fibra_ate_6_meses",
+    ]
+    .eq(0)
+    .all()
+)
 
 display(
     base_cenarios
@@ -3280,6 +3546,106 @@ cenarios = base_cenarios.merge(
     how="left",
     validate="many_to_many",
 )
+
+# ------------------------------------------------------------
+# Personalização de custo para Fibra mensal sem suporte até 6 meses
+#
+# Mantém uma única linha por público + segmento + cenário.
+# O custo_por_cliente passa a ser a média ponderada do segmento:
+#
+# custo médio =
+#   (clientes com mais de 6 meses × custo-base
+#    + clientes até 6 meses × custo personalizado)
+#   / clientes abordados
+#
+# Como a mesma taxa de adesão é aplicada aos dois subgrupos,
+# usar o custo médio preserva exatamente o custo total esperado.
+# ------------------------------------------------------------
+
+cenarios["custo_base_por_cliente"] = cenarios["custo_por_cliente"]
+
+mascara_fibra_personalizada = (
+    cenarios["segmento_acao"].eq("Fibra mensal sem suporte")
+)
+
+custo_fibra_ate_6 = cenarios["faixa_custo"].map(
+    CUSTOS_FIBRA_ATE_6_MESES
+)
+
+assert custo_fibra_ate_6[mascara_fibra_personalizada].notna().all(), (
+    "Há faixa de custo de Fibra sem valor definido "
+    "em CUSTOS_FIBRA_ATE_6_MESES."
+)
+
+cenarios.loc[mascara_fibra_personalizada, "custo_por_cliente"] = (
+    (
+        (
+            cenarios.loc[
+                mascara_fibra_personalizada,
+                "clientes_abordados",
+            ]
+            - cenarios.loc[
+                mascara_fibra_personalizada,
+                "clientes_fibra_ate_6_meses",
+            ]
+        )
+        * cenarios.loc[
+            mascara_fibra_personalizada,
+            "custo_base_por_cliente",
+        ]
+        + (
+            cenarios.loc[
+                mascara_fibra_personalizada,
+                "clientes_fibra_ate_6_meses",
+            ]
+            * custo_fibra_ate_6[mascara_fibra_personalizada]
+        )
+    )
+    / cenarios.loc[
+        mascara_fibra_personalizada,
+        "clientes_abordados",
+    ]
+)
+
+# Checagens: os demais segmentos não podem ter custo alterado.
+assert (
+    cenarios.loc[
+        ~mascara_fibra_personalizada,
+        "custo_por_cliente",
+    ]
+    .eq(
+        cenarios.loc[
+            ~mascara_fibra_personalizada,
+            "custo_base_por_cliente",
+        ]
+    )
+    .all()
+)
+
+assert cenarios["custo_por_cliente"].notna().all()
+
+# Evidência da personalização: uma linha por público e faixa de custo.
+validacao_custos_personalizados = (
+    cenarios[
+        (cenarios["taxa_contato_adesao"] == 0.80)
+        & (cenarios["efetividade_retencao"] == 0.30)
+        & (cenarios["horizonte_meses"] == 24)
+        & mascara_fibra_personalizada
+    ][
+        [
+            "publico_alvo",
+            "faixa_custo",
+            "clientes_abordados",
+            "clientes_fibra_ate_6_meses",
+            "custo_base_por_cliente",
+            "custo_por_cliente",
+        ]
+    ]
+    .drop_duplicates()
+    .sort_values(["publico_alvo", "faixa_custo"])
+)
+
+display(validacao_custos_personalizados.round(2))
 
 assert cenarios["custo_por_cliente"].notna().all(), (
     "Há segmento sem custo definido na MATRIZ_CUSTOS."
@@ -3628,6 +3994,23 @@ display(cenarios_dashboard.head(30).round(2))
 
 # COMMAND ----------
 
+cenarios_dashboard[
+    (cenarios_dashboard["taxa_contato_adesao"] == 0.80)
+    & (cenarios_dashboard["efetividade_retencao"] == 0.30)
+    & (cenarios_dashboard["horizonte_meses"] == 12)
+][
+    [
+        "publico_alvo",
+        "faixa_custo",
+        "custo_total",
+        "ebitda_preservado_potencial",
+        "resultado_liquido_ebitda_potencial",
+        "roi_ebitda_potencial_pct",
+    ]
+].sort_values(["publico_alvo", "faixa_custo"])
+
+# COMMAND ----------
+
 colunas_leitura = [
     "publico_alvo",
     "horizonte_meses",
@@ -3662,21 +4045,6 @@ display(cenarios_positivos[colunas_leitura].round(2))
 
 # COMMAND ----------
 
-cenarios_positivos_resumo = (
-    cenarios_positivos[
-        cenarios_positivos["taxa_contato_adesao"].eq(0.80)
-    ]
-    .sort_values(
-        ["horizonte_meses", "roi_ebitda_potencial_pct"],
-        ascending=[True, False],
-    )
-    .reset_index(drop=True)
-)
-
-display(cenarios_positivos_resumo[colunas_leitura].round(2))
-
-# COMMAND ----------
-
 # ------------------------------------------------------------
 # 5. Checagens e gravação no Unity Catalog
 # ------------------------------------------------------------
@@ -3692,6 +4060,8 @@ display(quantidade_por_publico_segmento)
 
 ESPERADO_POR_PUBLICO_SEGMENTO = 27 * len(HORIZONTES_MESES)
 
+ESPERADO_POR_PUBLICO_SEGMENTO = 27 * len(HORIZONTES_MESES)
+
 assert quantidade_por_publico_segmento["quantidade_cenarios"].eq(
     ESPERADO_POR_PUBLICO_SEGMENTO
 ).all(), (
@@ -3699,15 +4069,52 @@ assert quantidade_por_publico_segmento["quantidade_cenarios"].eq(
     f"{ESPERADO_POR_PUBLICO_SEGMENTO} cenários."
 )
 
+# No estado atual:
+# 12 combinações público + segmento × 81 cenários cada = 972 linhas.
+assert len(cenarios) == 972, (
+    f"Esperado: 972 linhas na tabela detalhada; "
+    f"encontrado: {len(cenarios)}."
+)
+
+# Cria o DataFrame Spark antes de gravar para validar o schema.
+cenarios_spark = spark.createDataFrame(cenarios)
+
+# Garante que as colunas e os tipos permaneçam iguais aos da tabela atual.
+schema_atual = spark.table(TABELA_CENARIOS).schema
+schema_novo = cenarios_spark.schema
+
+colunas_atuais = [campo.name for campo in schema_atual]
+colunas_novas = [campo.name for campo in schema_novo]
+
+assert colunas_novas == colunas_atuais, (
+    "As colunas da nova tabela diferem da estrutura atual. "
+    f"Atual: {colunas_atuais} | Nova: {colunas_novas}"
+)
+
+tipos_atuais = [
+    (campo.name, campo.dataType.simpleString())
+    for campo in schema_atual
+]
+
+tipos_novos = [
+    (campo.name, campo.dataType.simpleString())
+    for campo in schema_novo
+]
+
+assert tipos_novos == tipos_atuais, (
+    "Os tipos de dados da nova tabela diferem da estrutura atual. "
+    f"Atual: {tipos_atuais} | Nova: {tipos_novos}"
+)
+
+# Só executa se todas as validações acima passarem.
 (
-    spark.createDataFrame(cenarios)
+    cenarios_spark
     .write
     .mode("overwrite")
-    .option("overwriteSchema", "true")
     .saveAsTable(TABELA_CENARIOS)
 )
 
-print(f"Tabela detalhada criada: {TABELA_CENARIOS}")
+print(f"Tabela detalhada atualizada: {TABELA_CENARIOS}")
 print(f"Linhas gravadas: {len(cenarios):,}")
 
 # COMMAND ----------
@@ -3716,37 +4123,61 @@ TABELA_CENARIOS_DASHBOARD = (
     f"{CATALOG}.cenarios_retorno_churn_dashboard"
 )
 
+assert len(cenarios_dashboard) == 243, (
+    f"Esperado: 243 linhas na tabela agregada; "
+    f"encontrado: {len(cenarios_dashboard)}."
+)
+
+cenarios_dashboard_spark = spark.createDataFrame(cenarios_dashboard)
+
+schema_atual_dashboard = spark.table(
+    TABELA_CENARIOS_DASHBOARD
+).schema
+
+schema_novo_dashboard = cenarios_dashboard_spark.schema
+
+colunas_atuais_dashboard = [
+    campo.name for campo in schema_atual_dashboard
+]
+
+colunas_novas_dashboard = [
+    campo.name for campo in schema_novo_dashboard
+]
+
+assert colunas_novas_dashboard == colunas_atuais_dashboard, (
+    "As colunas da nova tabela agregada diferem da estrutura atual. "
+    f"Atual: {colunas_atuais_dashboard} | "
+    f"Nova: {colunas_novas_dashboard}"
+)
+
+tipos_atuais_dashboard = [
+    (campo.name, campo.dataType.simpleString())
+    for campo in schema_atual_dashboard
+]
+
+tipos_novos_dashboard = [
+    (campo.name, campo.dataType.simpleString())
+    for campo in schema_novo_dashboard
+]
+
+assert tipos_novos_dashboard == tipos_atuais_dashboard, (
+    "Os tipos de dados da nova tabela agregada diferem da estrutura atual. "
+    f"Atual: {tipos_atuais_dashboard} | "
+    f"Nova: {tipos_novos_dashboard}"
+)
+
 (
-    spark.createDataFrame(cenarios_dashboard)
+    cenarios_dashboard_spark
     .write
     .mode("overwrite")
-    .option("overwriteSchema", "true")
     .saveAsTable(TABELA_CENARIOS_DASHBOARD)
 )
 
-print(f"Tabela agregada para dashboard criada: {TABELA_CENARIOS_DASHBOARD}")
+print(
+    f"Tabela agregada atualizada: "
+    f"{TABELA_CENARIOS_DASHBOARD}"
+)
 print(f"Linhas gravadas: {len(cenarios_dashboard):,}")
-
-# COMMAND ----------
-
-cenario_central = cenarios[
-    (cenarios["faixa_custo"] == "Intermediario")
-    & (cenarios["taxa_contato_adesao"] == 0.80)
-    & (cenarios["efetividade_retencao"] == 0.20)
-].copy()
-
-display(
-    cenario_central.sort_values(
-        ["ordem_publico", "resultado_liquido_potencial"],
-        ascending=[True, False],
-    ).round(2)
-)
-
-# COMMAND ----------
-
-display(
-    spark.table("workspace.default.cenarios_retorno_churn_dashboard")
-)
 
 # COMMAND ----------
 
