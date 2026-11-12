@@ -18,11 +18,9 @@ Aquivos importantes:
 
 ## Equipe
 
-> Preencha antes de começar (edite este bloco no seu fork), depois faça commit + push.
-
-- **Nome/ID da equipe:** `<preencha>`
+- **Nome/ID da equipe:** `Equipe 5`
 - **Integrantes:**
-  - `<nome — e-mail>`
-  - `<nome — e-mail>`
-  - `<nome — e-mail>`
-  - `<nome — e-mail>`
+  - `Ana Santos - santos.anacaraujo@gmail.com `
+  - `João Madeira - jp.madeir4@gmail.com`
+  - `Juliana Souza - juliana.asouza03@gmail.com`
+  - `Tuanny Leite - tuanny.leite@gmail.com`
