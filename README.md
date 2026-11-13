@@ -25,6 +25,7 @@ Aquivos importantes:
   - Mateus Silva Rocha - mateus@asn.rocks
   - Fabiana Toledo - fabi.fatoledo@gmail.com
   - Murilo Silva - murilocauecostasilva@gmail.com
-  - Amanda Honorato -
   - Ligia Soares -
-  - Leandro Republicano -  
+  - Leandro Republicano -  leandrorepublicano@gmail.com
+
+
